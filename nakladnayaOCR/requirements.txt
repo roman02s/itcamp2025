@@ -1,0 +1,29 @@
+# Основные зависимости
+streamlit>=1.28.0
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Для OCR и обработки документов
+marker-pdf>=0.2.0
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Обработка изображений
+Pillow>=10.0.0
+opencv-python>=4.8.0
+
+# Обработка PDF
+PyPDF2>=3.0.0
+pymupdf>=1.23.0
+
+# Машинное обучение и NLP
+transformers>=4.30.0
+sentence-transformers>=2.2.0
+
+# Утилиты
+python-dateutil>=2.8.0
+regex>=2023.6.0
+
+# Веб-интерфейс
+plotly>=5.15.0
+matplotlib>=3.7.0
