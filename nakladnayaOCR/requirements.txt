@@ -4,7 +4,7 @@ numpy>=1.24.0
 pandas>=2.0.0
 
 # Для OCR и обработки документов
-marker-pdf>=0.2.0
+marker-pdf[all]>=0.2.0
 torch>=2.0.0
 torchvision>=0.15.0
 
@@ -19,6 +19,7 @@ pymupdf>=1.23.0
 # Машинное обучение и NLP
 transformers>=4.30.0
 sentence-transformers>=2.2.0
+ultralytics>=8.0.0
 
 # Утилиты
 python-dateutil>=2.8.0

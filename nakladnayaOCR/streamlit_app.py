@@ -13,7 +13,7 @@ import logging
 import streamlit as st
 
 from src.parser import InvoiceParser
-from src.utils import TextProcessor, MarkerRunner
+from src.utils import TextProcessor, MarkerRunner, YoloMarkerProcessor
 from src.config import Config
 
 # Настройка логирования
@@ -66,6 +66,15 @@ def main():
         st.subheader("Обработка текста")
         max_lines_section = st.slider("Макс. строк для секции", 5, 20, 8)
         confidence_threshold = st.slider("Порог уверенности", 0.1, 1.0, 0.7)
+        
+        # Настройки YOLO
+        st.subheader("YOLO детекция")
+        use_yolo = st.checkbox(
+            "Использовать YOLO детекцию полей", 
+            value=True,
+            help="Автоматическое обнаружение полей с помощью обученной YOLO модели"
+        )
+        yolo_confidence = st.slider("Порог уверенности YOLO", 0.1, 1.0, 0.25)
     
     # Основная область
     col1, col2 = st.columns([1, 1])
@@ -113,9 +122,19 @@ def main():
                     debug_mode=debug_mode
                 )
                 
-                marker_runner = MarkerRunner(config)
-                text_processor = TextProcessor(config)
-                invoice_parser = InvoiceParser(config, text_processor)
+                # Выбор обработчика
+                if use_yolo:
+                    processor = YoloMarkerProcessor(config)
+                    use_enhanced_processing = processor.is_yolo_available()
+                    if not use_enhanced_processing:
+                        st.warning("⚠️ YOLO недоступен, используется стандартная обработка")
+                else:
+                    use_enhanced_processing = False
+                
+                if not use_enhanced_processing:
+                    marker_runner = MarkerRunner(config)
+                    text_processor = TextProcessor(config)
+                    invoice_parser = InvoiceParser(config, text_processor)
                 
                 with tempfile.TemporaryDirectory() as tmpdir:
                     tmpdir = Path(tmpdir)
@@ -128,33 +147,54 @@ def main():
                     with open(input_path, "wb") as f:
                         f.write(uploaded_file.read())
                     
-                    # Запуск Marker OCR
-                    status_container.info("🔍 Выполнение OCR...")
-                    progress_bar.progress(30)
-                    
-                    try:
-                        output_path = marker_runner.run(input_path, tmpdir / "marker_out")
+                    if use_enhanced_processing:
+                        # YOLO + Marker обработка
+                        status_container.info("🎯 YOLO детекция полей...")
+                        progress_bar.progress(20)
                         
-                        # Извлечение текста
-                        status_container.info("📝 Извлечение текста...")
-                        progress_bar.progress(60)
+                        status_container.info("🔍 Выполнение OCR...")
+                        progress_bar.progress(50)
                         
-                        text = text_processor.extract_text_from_marker_output(output_path)
-                        
-                        if debug_mode:
-                            st.expander("🔍 Извлеченный текст (первые 2000 символов)").text(text[:2000])
-                        
-                        # Парсинг информации
-                        status_container.info("🧠 Извлечение информации...")
+                        status_container.info("📝 Извлечение текста из полей...")
                         progress_bar.progress(80)
                         
-                        result = invoice_parser.parse(text)
+                        # Полная обработка через YOLO + Marker
+                        enhanced_result = processor.process_document(input_path, tmpdir / "output")
                         
-                        status_container.success("✅ Обработка завершена!")
+                        status_container.success("✅ Расширенная обработка завершена!")
                         progress_bar.progress(100)
                         
                         # Отображение результатов
-                        display_results(result, debug_mode, text if debug_mode else None)
+                        display_enhanced_results(enhanced_result, debug_mode)
+                        
+                    else:
+                        # Стандартная обработка
+                        status_container.info("🔍 Выполнение OCR...")
+                        progress_bar.progress(30)
+                        
+                        try:
+                            output_path = marker_runner.run(input_path, tmpdir / "marker_out")
+                            
+                            # Извлечение текста
+                            status_container.info("📝 Извлечение текста...")
+                            progress_bar.progress(60)
+                            
+                            text = text_processor.extract_text_from_marker_output(output_path)
+                            
+                            if debug_mode:
+                                st.expander("🔍 Извлеченный текст (первые 2000 символов)").text(text[:2000])
+                            
+                            # Парсинг информации
+                            status_container.info("🧠 Извлечение информации...")
+                            progress_bar.progress(80)
+                            
+                            result = invoice_parser.parse(text)
+                            
+                            status_container.success("✅ Обработка завершена!")
+                            progress_bar.progress(100)
+                            
+                            # Отображение результатов
+                            display_results(result, debug_mode, text if debug_mode else None)
                         
                     except subprocess.CalledProcessError as e:
                         status_container.error("❌ Ошибка при запуске Marker OCR")
@@ -325,6 +365,170 @@ def create_csv_export(result: Dict) -> str:
     ])
     
     return output.getvalue()
+
+
+def display_enhanced_results(enhanced_result: Dict, debug_mode: bool):
+    """Отображение результатов расширенной обработки (YOLO + Marker)"""
+    
+    st.subheader("🎯 Результаты YOLO + Marker обработки")
+    
+    # Проверяем успешность обработки
+    if not enhanced_result.get("processing_success", False):
+        st.error("❌ Ошибка при обработке документа")
+        if "error" in enhanced_result:
+            st.error(f"Детали ошибки: {enhanced_result['error']}")
+        return
+    
+    # Статистика YOLO детекции
+    yolo_data = enhanced_result.get("yolo_detection")
+    if yolo_data:
+        st.subheader("📊 Статистика детекции полей")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Всего полей", yolo_data["field_count"])
+        
+        with col2:
+            summary = yolo_data.get("summary", {})
+            st.metric("Высокая уверенность", summary.get("high_confidence_fields", 0))
+        
+        with col3:
+            avg_conf = summary.get("average_confidence", 0)
+            st.metric("Средняя уверенность", f"{avg_conf:.2f}")
+        
+        with col4:
+            detected_types = len(summary.get("detected_types", []))
+            st.metric("Типов полей", detected_types)
+        
+        # Детали по полям
+        if yolo_data["fields"]:
+            st.subheader("🔍 Обнаруженные поля")
+            
+            # Создаем таблицу полей
+            fields_data = []
+            for field in yolo_data["fields"]:
+                fields_data.append({
+                    "Тип поля": field["field_name"],
+                    "Уверенность": f"{field['confidence']:.3f}",
+                    "Координаты": f"({field['bbox']['x1']:.0f}, {field['bbox']['y1']:.0f}) - ({field['bbox']['x2']:.0f}, {field['bbox']['y2']:.0f})",
+                    "Размер": f"{field['bbox']['width']:.0f} × {field['bbox']['height']:.0f}"
+                })
+            
+            import pandas as pd
+            df = pd.DataFrame(fields_data)
+            st.dataframe(df, use_container_width=True)
+    
+    # Аннотированное изображение
+    annotated_image = enhanced_result.get("annotated_image")
+    if annotated_image and Path(annotated_image).exists():
+        st.subheader("🖼️ Аннотированное изображение")
+        st.image(annotated_image, caption="Обнаруженные поля", use_container_width=True)
+    
+    # Тексты полей
+    field_texts = enhanced_result.get("field_texts", {})
+    if field_texts:
+        st.subheader("📝 Извлеченные тексты полей")
+        
+        # Создаем табы для разных полей
+        tabs = st.tabs(list(field_texts.keys())[:6])  # Ограничиваем количество табов
+        
+        for i, (field_name, text) in enumerate(field_texts.items()):
+            if i < len(tabs):
+                with tabs[i]:
+                    st.text_area(f"Текст поля {field_name}", text, height=100, disabled=True)
+    
+    # Полный текст документа
+    full_text = enhanced_result.get("marker_text")
+    if full_text:
+        with st.expander("📄 Полный текст документа"):
+            st.text_area("Marker OCR", full_text[:2000] + "..." if len(full_text) > 2000 else full_text, 
+                        height=300, disabled=True)
+    
+    # Отладочная информация
+    if debug_mode:
+        with st.expander("🔧 Отладочная информация"):
+            st.json(enhanced_result)
+    
+    # Экспорт результатов
+    st.subheader("💾 Экспорт результатов")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        # JSON экспорт
+        json_str = json.dumps(enhanced_result, ensure_ascii=False, indent=2, default=str)
+        st.download_button(
+            label="📄 Скачать полные результаты (JSON)",
+            data=json_str,
+            file_name="yolo_marker_results.json",
+            mime="application/json"
+        )
+    
+    with col2:
+        # Экспорт только текстов полей
+        if field_texts:
+            fields_json = json.dumps(field_texts, ensure_ascii=False, indent=2)
+            st.download_button(
+                label="📝 Скачать тексты полей (JSON)",
+                data=fields_json,
+                file_name="field_texts.json",
+                mime="application/json"
+            )
+    
+    with col3:
+        # CSV экспорт полей
+        if yolo_data and yolo_data["fields"]:
+            csv_data = create_fields_csv_export(yolo_data["fields"], field_texts)
+            st.download_button(
+                label="📊 Скачать данные полей (CSV)",
+                data=csv_data,
+                file_name="detected_fields.csv",
+                mime="text/csv"
+            )
+
+
+def create_fields_csv_export(fields: List[Dict], field_texts: Dict[str, str]) -> str:
+    """Создание CSV экспорта для полей"""
+    import io
+    import csv
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Заголовки
+    writer.writerow([
+        "Тип поля", "Название", "Уверенность", "X1", "Y1", "X2", "Y2", 
+        "Ширина", "Высота", "Извлеченный текст"
+    ])
+    
+    # Данные полей
+    for field in fields:
+        bbox = field["bbox"]
+        field_type = field["field_type"]
+        
+        # Ищем соответствующий текст
+        extracted_text = ""
+        for text_key, text_value in field_texts.items():
+            if field_type in text_key:
+                extracted_text = text_value
+                break
+        
+        writer.writerow([
+            field_type,
+            field["field_name"],
+            f"{field['confidence']:.3f}",
+            f"{bbox['x1']:.0f}",
+            f"{bbox['y1']:.0f}",
+            f"{bbox['x2']:.0f}",
+            f"{bbox['y2']:.0f}",
+            f"{bbox['width']:.0f}",
+            f"{bbox['height']:.0f}",
+            extracted_text
+        ])
+    
+    return output.getvalue()
+
 
 if __name__ == "__main__":
     main()

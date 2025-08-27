@@ -7,8 +7,12 @@ import re
 import json
 import subprocess
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Any
 import logging
+
+from marker.converters.pdf import PdfConverter
+from marker.models import create_model_dict
+from marker.config.parser import ConfigParser
 
 from .config import Config
 
@@ -196,64 +200,58 @@ class MarkerRunner:
     
     def __init__(self, config: Config):
         self.config = config
+        self._setup_converter()
+    
+    def _setup_converter(self):
+        """Настройка конвертера Marker"""
+        # Создание конфигурации для Marker
+        marker_config = {
+            "output_format": self.config.output_format,
+        }
+        
+        # Добавляем дополнительные настройки если они есть
+        if hasattr(self.config, 'force_ocr') and self.config.force_ocr:
+            marker_config["FORCE_OCR"] = True
+        
+        # Создание парсера конфигурации
+        self.config_parser = ConfigParser(marker_config)
+        
+        # Создание конвертера
+        self.converter = PdfConverter(
+            config=self.config_parser.generate_config_dict(),
+            artifact_dict=create_model_dict(),
+            processor_list=self.config_parser.get_processors(),
+            renderer=self.config_parser.get_renderer(),
+            llm_service=self.config_parser.get_llm_service()
+        )
+        
+        logger.info("Marker конвертер инициализирован")
     
     def run(self, input_path: Path, output_dir: Path) -> Path:
         """Запуск Marker для обработки документа"""
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Формирование команды
-        cmd = [
-            "marker_single",
-            str(input_path),
-            "--output_format", self.config.output_format,
-            "--output_dir", str(output_dir),
-        ]
-        
-        if self.config.force_ocr:
-            cmd.append("--force_ocr")
-        
-        # Настройка окружения
-        env = os.environ.copy()
-        env.setdefault("CUDA_VISIBLE_DEVICES", "")
-        env.setdefault("TORCH_DEVICE", self.config.torch_device)
-        
-        logger.info(f"Запуск команды: {' '.join(cmd)}")
+        logger.info(f"Запуск Marker для файла: {input_path}")
         
         try:
-            # Запуск процесса
-            result = subprocess.run(
-                cmd,
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=env,
-                timeout=300  # 5 минут таймаут
-            )
+            # Запуск конвертации через новый API
+            result = self.converter(str(input_path))
             
-            if self.config.debug_mode:
-                logger.info(f"Marker stdout: {result.stdout}")
-                if result.stderr:
-                    logger.warning(f"Marker stderr: {result.stderr}")
+            # Определение выходного файла
+            output_file = self._get_output_path(input_path, output_dir)
             
-        except subprocess.TimeoutExpired:
-            raise RuntimeError("Marker превысил время ожидания (5 минут)")
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Marker завершился с ошибкой: {e}")
-            logger.error(f"Stderr: {e.stderr}")
-            raise
-        
-        # Поиск выходного файла
-        output_file = self._find_output_file(input_path, output_dir)
-        
-        if not output_file.exists():
-            raise FileNotFoundError(f"Marker не создал ожидаемый выходной файл: {output_file}")
-        
-        logger.info(f"Marker создал файл: {output_file}")
-        return output_file
+            # Сохранение результата в зависимости от формата
+            self._save_result(result, output_file)
+            
+            logger.info(f"Marker создал файл: {output_file}")
+            return output_file
+            
+        except Exception as e:
+            logger.error(f"Ошибка при работе с Marker: {e}")
+            raise RuntimeError(f"Marker завершился с ошибкой: {str(e)}")
     
-    def _find_output_file(self, input_path: Path, output_dir: Path) -> Path:
-        """Поиск выходного файла Marker"""
+    def _get_output_path(self, input_path: Path, output_dir: Path) -> Path:
+        """Определение пути для выходного файла"""
         # Определение расширения по формату
         suffix_map = {
             "markdown": ".md",
@@ -263,18 +261,226 @@ class MarkerRunner:
         }
         
         suffix = suffix_map.get(self.config.output_format, ".md")
+        return (output_dir / input_path.name).with_suffix(suffix)
+    
+    def _save_result(self, result, output_file: Path):
+        """Сохранение результата в файл"""
+        try:
+            if self.config.output_format == "json":
+                # Для JSON формата сохраняем как JSON
+                if hasattr(result, '__dict__'):
+                    # Если result это объект, конвертируем в словарь
+                    data = result.__dict__ if hasattr(result, '__dict__') else result
+                else:
+                    # Если result это уже словарь или строка
+                    data = result
+                
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+            else:
+                # Для других форматов сохраняем как текст
+                content = str(result)
+                output_file.write_text(content, encoding='utf-8')
+                
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении результата: {e}")
+            # Fallback - сохраняем как строку
+            output_file.write_text(str(result), encoding='utf-8')
+
+
+class YoloMarkerProcessor:
+    """Класс для совместной обработки YOLO + Marker"""
+    
+    def __init__(self, config: Config):
+        self.config = config
+        self.text_processor = TextProcessor(config)
+        self.marker_runner = MarkerRunner(config)
         
-        # Основной ожидаемый путь
-        expected_file = (output_dir / input_path.name).with_suffix(suffix)
+        # Инициализация YOLO детектора
+        try:
+            from .yolo_detector import YoloFieldDetector
+            self.yolo_detector = YoloFieldDetector()
+            self.yolo_available = self.yolo_detector.is_available()
+        except ImportError:
+            logger.warning("YOLO детектор недоступен")
+            self.yolo_detector = None
+            self.yolo_available = False
+    
+    def process_document(self, input_path: Path, output_dir: Path) -> Dict[str, Any]:
+        """
+        Полная обработка документа: YOLO детекция + Marker OCR
         
-        if expected_file.exists():
-            return expected_file
+        Returns:
+            Словарь с результатами обработки
+        """
+        results = {
+            "input_path": str(input_path),
+            "yolo_detection": None,
+            "marker_text": None,
+            "field_texts": {},
+            "annotated_image": None,
+            "processing_success": False
+        }
         
-        # Fallback: поиск любого файла с нужным расширением
-        candidates = sorted(output_dir.glob(f"*{suffix}"))
-        if candidates:
-            logger.warning(f"Ожидаемый файл {expected_file} не найден, используем {candidates[0]}")
-            return candidates[0]
+        try:
+            # 1. Конвертация PDF в изображения для YOLO (если это PDF)
+            yolo_images = []
+            if input_path.suffix.lower() == '.pdf':
+                yolo_images = self._convert_pdf_to_images(input_path, output_dir / "pdf_pages")
+            else:
+                yolo_images = [input_path]  # Если уже изображение
+            
+            # 2. YOLO детекция полей (если доступна)
+            if self.yolo_available and yolo_images:
+                logger.info("Запуск YOLO детекции полей...")
+                # Обрабатываем первую страницу для начала
+                first_image = yolo_images[0] if yolo_images else None
+                if first_image and first_image.exists():
+                    fields = self.yolo_detector.detect_fields(str(first_image))
+                    results["yolo_detection"] = {
+                        "fields": fields,
+                        "field_count": len(fields),
+                        "summary": self.yolo_detector.get_field_summary(str(first_image))
+                    }
+                    
+                    # Создание аннотированного изображения
+                    annotated_path = self.yolo_detector.create_annotated_image(
+                        str(first_image), 
+                        str(output_dir / f"{first_image.stem}_annotated{first_image.suffix}")
+                    )
+                    results["annotated_image"] = annotated_path
+                
+            # 2. Marker OCR для полного документа
+            logger.info("Запуск Marker OCR...")
+            marker_output = self.marker_runner.run(input_path, output_dir)
+            full_text = self.text_processor.extract_text_from_marker_output(marker_output)
+            results["marker_text"] = full_text
+            
+            # 3. Извлечение текста из регионов полей (если YOLO доступна)
+            if self.yolo_available and results.get("yolo_detection", {}).get("fields"):
+                # Используем первое изображение для извлечения полей
+                field_image = yolo_images[0] if yolo_images else input_path
+                results["field_texts"] = self._extract_field_texts(
+                    field_image, results["yolo_detection"]["fields"], output_dir
+                )
+            
+            results["processing_success"] = True
+            logger.info("Обработка документа завершена успешно")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обработке документа: {e}")
+            results["error"] = str(e)
         
-        # Если ничего не найдено, возвращаем ожидаемый путь для лучшего сообщения об ошибке
-        return expected_file
+        return results
+    
+    def _extract_field_texts(self, input_path: Path, fields: List[Dict], output_dir: Path) -> Dict[str, str]:
+        """Извлечение текста из регионов полей через Marker"""
+        field_texts = {}
+        
+        if not self.yolo_available:
+            return field_texts
+        
+        try:
+            # Извлекаем регионы полей как изображения
+            regions = self.yolo_detector.extract_field_regions(str(input_path), fields)
+            
+            for field_key, region_image in regions.items():
+                try:
+                    # Сохраняем регион как временное изображение
+                    region_path = output_dir / f"field_{field_key}.png"
+                    region_image.save(region_path)
+                    
+                    # Обрабатываем регион через Marker
+                    region_output = self.marker_runner.run(region_path, output_dir / "regions")
+                    region_text = self.text_processor.extract_text_from_marker_output(region_output)
+                    
+                    # Очистка и нормализация текста
+                    clean_text = self.text_processor.normalize_text(region_text)
+                    if clean_text:
+                        field_texts[field_key] = clean_text
+                    
+                    # Удаляем временный файл
+                    region_path.unlink(missing_ok=True)
+                    
+                except Exception as e:
+                    logger.error(f"Ошибка обработки региона {field_key}: {e}")
+                    continue
+            
+            logger.info(f"Извлечен текст из {len(field_texts)} полей")
+            
+        except Exception as e:
+            logger.error(f"Ошибка извлечения текстов полей: {e}")
+        
+        return field_texts
+    
+    def is_yolo_available(self) -> bool:
+        """Проверка доступности YOLO"""
+        return self.yolo_available
+    
+    def get_field_summary(self, input_path: Path) -> Dict[str, Any]:
+        """Получение сводки по полям"""
+        if not self.yolo_available:
+            return {"error": "YOLO недоступен"}
+        
+        return self.yolo_detector.get_field_summary(str(input_path))
+    
+    def _convert_pdf_to_images(self, pdf_path: Path, output_dir: Path) -> List[Path]:
+        """
+        Конвертация PDF в изображения для YOLO обработки
+        
+        Args:
+            pdf_path: Путь к PDF файлу
+            output_dir: Директория для сохранения изображений
+            
+        Returns:
+            Список путей к созданным изображениям
+        """
+        output_dir.mkdir(parents=True, exist_ok=True)
+        image_paths = []
+        
+        try:
+            import fitz  # PyMuPDF
+            
+            # Открываем PDF
+            pdf_document = fitz.open(pdf_path)
+            
+            for page_num in range(len(pdf_document)):
+                page = pdf_document.load_page(page_num)
+                
+                # Конвертируем в изображение с высоким разрешением
+                mat = fitz.Matrix(2.0, 2.0)  # Увеличиваем разрешение в 2 раза
+                pix = page.get_pixmap(matrix=mat)
+                
+                # Сохраняем изображение
+                image_path = output_dir / f"page_{page_num + 1}.png"
+                pix.save(str(image_path))
+                image_paths.append(image_path)
+                
+                logger.info(f"Создано изображение: {image_path}")
+            
+            pdf_document.close()
+            
+        except ImportError:
+            logger.warning("PyMuPDF не установлен, используем альтернативный метод")
+            
+            try:
+                import pdf2image
+                
+                # Конвертация с помощью pdf2image
+                images = pdf2image.convert_from_path(pdf_path, dpi=200)
+                
+                for i, image in enumerate(images):
+                    image_path = output_dir / f"page_{i + 1}.png"
+                    image.save(image_path, 'PNG')
+                    image_paths.append(image_path)
+                    logger.info(f"Создано изображение: {image_path}")
+                    
+            except ImportError:
+                logger.error("Не установлены библиотеки для конвертации PDF: PyMuPDF или pdf2image")
+                return []
+        
+        except Exception as e:
+            logger.error(f"Ошибка при конвертации PDF в изображения: {e}")
+            return []
+        
+        return image_paths

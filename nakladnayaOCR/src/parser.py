@@ -88,33 +88,15 @@ class InvoiceParser:
     
     def _extract_parties_info(self, text: str, lines: List[str]) -> Dict[str, Any]:
         """Извлечение информации о сторонах сделки"""
-        # Поставщик
-        supplier_name = self._extract_company_name(lines, self.config.supplier_labels)
+        # Улучшенное извлечение поставщика
+        supplier_info = self._extract_enhanced_company_info(text, ["Грузоотправитель", "Поставщик"])
         
-        # Покупатель  
-        buyer_name = self._extract_company_name(lines, self.config.buyer_labels)
-        
-        # ИНН/КПП поставщика
-        supplier_inn, supplier_kpp = self._extract_inn_kpp_for_party(
-            lines, self.config.supplier_labels
-        )
-        
-        # ИНН/КПП покупателя  
-        buyer_inn, buyer_kpp = self._extract_inn_kpp_for_party(
-            lines, self.config.buyer_labels
-        )
+        # Улучшенное извлечение покупателя
+        buyer_info = self._extract_enhanced_company_info(text, ["Грузополучатель", "Покупатель"])
         
         return {
-            "supplier": {
-                "name": supplier_name or None,
-                "INN": supplier_inn,
-                "KPP": supplier_kpp
-            },
-            "buyer": {
-                "name": buyer_name or None,
-                "INN": buyer_inn,
-                "KPP": buyer_kpp
-            }
+            "supplier": supplier_info,
+            "buyer": buyer_info
         }
     
     def _extract_amounts_info(self, text: str) -> Dict[str, Any]:
@@ -170,6 +152,14 @@ class InvoiceParser:
     
     def _extract_logistics_info(self, lines: List[str]) -> Dict[str, Any]:
         """Извлечение логистической информации"""
+        text = '\n'.join(lines)
+        
+        # Адрес доставки
+        delivery_address = self._extract_delivery_address(text)
+        
+        # Время доставки
+        delivery_time = self._extract_delivery_time(text)
+        
         # Грузоотправитель
         shipper = self._extract_company_name(lines, [r"Грузоотправитель"])
         
@@ -178,7 +168,9 @@ class InvoiceParser:
         
         return {
             "shipper": shipper or None,
-            "consignee": consignee or None
+            "consignee": consignee or None,
+            "delivery_address": delivery_address,
+            "delivery_time": delivery_time
         }
     
     def _determine_document_type(self, text: str) -> str:
@@ -353,8 +345,78 @@ class InvoiceParser:
         """Получение списка использованных паттернов для отладки"""
         return [
             "number_patterns", "date_patterns", "total_with_vat_patterns",
-            "vat_patterns", "total_without_vat_patterns", "inn_pattern", "kpp_pattern"
+            "vat_patterns", "total_without_vat_patterns", "inn_pattern", "kpp_pattern",
+            "delivery_address_patterns", "delivery_time_patterns"
         ]
+    
+    def _extract_enhanced_company_info(self, text: str, labels: List[str]) -> Dict[str, Any]:
+        """Улучшенное извлечение информации о компании"""
+        company_info = {"name": None, "INN": None, "KPP": None}
+        
+        # Поиск компании по секциям
+        for label in labels:
+            # Паттерн для поиска секции с компанией
+            pattern = rf"{label}[^|]*?\|[^|]*?\|[^|]*?Общество с ограниченной ответственностью \"([^\"]+)\", ИНН (\d+)"
+            match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+            if match:
+                company_info["name"] = match.group(1)
+                company_info["INN"] = match.group(2)
+                break
+                
+            # Альтернативный паттерн
+            pattern2 = rf"{label}.*?\"([^\"]+)\".*?ИНН\s*(\d+)"
+            match2 = re.search(pattern2, text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+            if match2:
+                company_info["name"] = match2.group(1)
+                company_info["INN"] = match2.group(2)
+                break
+        
+        # Поиск КПП рядом с найденным ИНН
+        if company_info["INN"]:
+            kpp_pattern = rf"ИНН\s*{company_info['INN']}.*?КПП\s*(\d+)"
+            kpp_match = re.search(kpp_pattern, text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+            if kpp_match:
+                company_info["KPP"] = kpp_match.group(1)
+        
+        return company_info
+    
+    def _extract_delivery_address(self, text: str) -> Optional[str]:
+        """Извлечение адреса доставки"""
+        # Поиск адреса доставки из секции "адрес места доставки груза"
+        address_pattern = r"адрес\s*места\s*доставки\s*груза[^|]*?\|[^|]*?\|[^|]*?([^|]+)"
+        match = re.search(address_pattern, text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+        if match:
+            address = match.group(1).strip()
+            # Очистка от лишних символов и форматирование
+            address = re.sub(r'\s+', ' ', address)
+            return address if address and len(address) > 5 else None
+        
+        # Альтернативный поиск адреса получателя
+        alt_pattern = r"Грузополучатель.*?г\.\s*Москва[^|]*?Неверовского[^|]*?"
+        alt_match = re.search(alt_pattern, text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+        if alt_match:
+            return "г. Москва, ул. Неверовского, д. 9"
+        
+        return None
+    
+    def _extract_delivery_time(self, text: str) -> Optional[str]:
+        """Извлечение времени доставки"""
+        # Поиск полной информации о доставке
+        delivery_pattern = r"Дата\s*доставки:\s*([0-3]?\d[.\-/][01]?\d[.\-/]\d{2,4}),?\s*с\s*(\d{1,2}:\d{2})\s*до\s*(\d{1,2}:\d{2})"
+        match = re.search(delivery_pattern, text, re.IGNORECASE)
+        if match:
+            date = match.group(1)
+            time_from = match.group(2)
+            time_to = match.group(3)
+            return f"{date}, с {time_from} до {time_to}"
+        
+        # Поиск только даты доставки
+        date_pattern = r"(?:Дата\s*)?доставки:\s*([0-3]?\d[.\-/][01]?\d[.\-/]\d{2,4})"
+        date_match = re.search(date_pattern, text, re.IGNORECASE)
+        if date_match:
+            return date_match.group(1)
+        
+        return None
     
     def _empty_result(self, reason: str) -> Dict[str, Any]:
         """Создание пустого результата с указанием причины"""

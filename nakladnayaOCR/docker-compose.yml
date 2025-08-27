@@ -9,20 +9,31 @@ services:
     ports:
       - "8501:8501"
     volumes:
-      # Монтируем директорию с данными для persistent storage
+      # Монтируем директории с данными для persistent storage
       - ./data:/app/data
       - ./uploads:/app/uploads
       - ./temp:/app/temp
       # Опционально: для разработки можно монтировать исходный код
-      # - ./src:/app/src
-      # - ./streamlit_app.py:/app/streamlit_app.py
+      - ./src:/app/src
+      - ./streamlit_app.py:/app/streamlit_app.py
     environment:
       - PYTHONPATH=/app
       - STREAMLIT_SERVER_PORT=8501
       - STREAMLIT_SERVER_ADDRESS=0.0.0.0
       - STREAMLIT_SERVER_HEADLESS=true
       - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+      - CUDA_VISIBLE_DEVICES=0
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - TORCH_DEVICE=cuda
     restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
       interval: 30s

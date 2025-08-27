@@ -1,5 +1,5 @@
-# Используем официальный Python 3.12 образ
-FROM python:3.12-slim
+# Используем официальный CUDA образ с Python
+FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
 
 # Установка системных зависимостей
 RUN apt-get update && apt-get install -y \
@@ -20,6 +20,8 @@ RUN apt-get update && apt-get install -y \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
+# Python уже установлен в базовом образе PyTorch
+
 # Установка рабочей директории
 WORKDIR /app
 
@@ -27,6 +29,7 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Обновление pip и установка Python зависимостей
+# PyTorch уже установлен в базовом образе
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
@@ -42,13 +45,12 @@ ENV STREAMLIT_SERVER_PORT=8501
 ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
 ENV STREAMLIT_SERVER_HEADLESS=true
 ENV STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+ENV CUDA_VISIBLE_DEVICES=0
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
 # Открытие порта
 EXPOSE 8501
-
-# Создание пользователя для безопасности
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
-USER appuser
 
 # Команда запуска
 CMD ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
