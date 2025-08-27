@@ -1,15 +1,15 @@
 flowchart LR
   %% ---------- Blue & White palette ----------
-  classDef kas fill:#DBEAFE,stroke:#60A5FA,color:#0F172A,stroke-width:1.5px;
-  classDef ch  fill:#EFF6FF,stroke:#3B82F6,color:#0F172A,stroke-width:1.5px;
-  classDef obs fill:#EEF2FF,stroke:#1D4ED8,color:#0F172A,stroke-width:1.5px;
-  classDef core fill:#FFFFFF,stroke:#60A5FA,color:#0F172A,stroke-width:1.5px;
-  classDef ext fill:#FFFFFF,stroke:#93C5FD,color:#0F172A,stroke-width:1.5px;
+  classDef kas fill:#DBEAFE,stroke:#60A5FA,color:#000000,stroke-width:1.5px,font-size:15px;
+  classDef ch  fill:#EFF6FF,stroke:#3B82F6,color:#000000,stroke-width:1.5px,font-size:15px;
+  classDef obs fill:#EEF2FF,stroke:#1D4ED8,color:#000000,stroke-width:1.5px,font-size:15px;
+  classDef core fill:#FFFFFF,stroke:#60A5FA,color:#000000,stroke-width:1.5px,font-size:15px;
+  classDef ext fill:#FFFFFF,stroke:#93C5FD,color:#000000,stroke-width:1.5px,font-size:15px;
 
   %% ---------- Actors / External ----------
   users["Рабочие станции и серверы"]:::ext
   admin["Команда безопасности"]:::ext
-  internet["Интернет"]:::ext
+  internet["Внешняя корп. сеть"]:::ext
 
   %% ---------- Core services ----------
   subgraph coreZone["Критичные сервисы"]
@@ -17,16 +17,16 @@ flowchart LR
     mail["Почтовый сервер"]:::core
     data["Данные и резервные копии"]:::core
   end
-  style coreZone fill:#FFFFFF,stroke:#60A5FA,stroke-width:1.5px
+  style coreZone fill:#FFFFFF,stroke:#60A5FA,stroke-width:1.5px,font-size:15px;
 
   %% ---------- Kaspersky ----------
   subgraph kasZone["Kaspersky"]
     kes["Антивирус на рабочих местах"]:::kas
     edr["Обнаружение и реагирование"]:::kas
     ksm["Защита почты"]:::kas
-    kwts["Веб-шлюз"]:::kas
+    kwts["DMZ"]:::kas
   end
-  style kasZone fill:#DBEAFE,stroke:#60A5FA,color:#0F172A,stroke-width:1.5px
+  style kasZone fill:#DBEAFE,stroke:#60A5FA,color:#000000,stroke-width:1.5px,font-size:15px;
 
   %% ---------- Channels & Encryption ----------
   subgraph chZone["Каналы и шифрование"]
@@ -34,21 +34,21 @@ flowchart LR
     tls["Сертификаты и ротация ключей"]:::ch
     enc["Шифрование по умолчанию"]:::ch
   end
-  style chZone fill:#EFF6FF,stroke:#3B82F6,stroke-width:1.5px
+  style chZone fill:#EFF6FF,stroke:#3B82F6,color:#000000,stroke-width:1.5px,font-size:15px;
 
   %% ---------- Monitoring & Access ----------
   subgraph obsZone["Мониторинг и доступ"]
     siem["Центр мониторинга"]:::obs
     iam["Управление доступом"]:::obs
   end
-  style obsZone fill:#EEF2FF,stroke:#1D4ED8,stroke-width:1.5px
+  style obsZone fill:#EEF2FF,stroke:#1D4ED8,color:#000000,stroke-width:1.5px,font-size:15px;
 
   %% ---------- Policies & Drills ----------
   subgraph policyZone["Процессы безопасности"]
     policies["Политики безопасности"]:::core
     drills["Киберучения и обучение"]:::core
   end
-  style policyZone fill:#FFFFFF,stroke:#60A5FA,stroke-width:1.5px
+  style policyZone fill:#FFFFFF,stroke:#60A5FA,color:#000000,stroke-width:1.5px,font-size:15px;
 
   %% ---------- Relations ----------
   users --> kes

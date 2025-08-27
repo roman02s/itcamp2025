@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Оператор завода — интерактивная карта (итог)</title>
+<style>
+    *{box-sizing:border-box;margin:0;padding:0;font-family:Arial, sans-serif}
+    body{display:flex;height:100vh;background:#eef2f6;color:#222;user-select: none;}
+    .sidebar {width: 250px; background-color: #2c4d6e; color: white; padding: 20px 0; height: 100vh; overflow-y: auto;}
+    .sidebar-header {padding: 0 20px 20px; margin-bottom: 20px; color:#d9ebff;}
+    .sidebar-header h2 {font-size: 22px; font-weight: 600; filter: drop-shadow(0 0 5px orange);}
+    .menu-item {
+        background-color: #0637a865;
+        padding: 12px 20px;
+        margin-bottom: 3px;
+        cursor: pointer;
+        transition: background-color 0.3s;
+        display: flex;
+        align-items: center;
+        font-weight: 600;
+        box-shadow: 0px 5px 5px 0px rgba(206, 228, 236, 0.879);
+    }
+    .menu-item:hover { background-color: #0265a7; }
+    .menu-item.active { background-color: #3498db; }
+    .menu-item i { margin-right: 10px; width: 20px; text-align: center; }
+    .hidden {display: none !important;}
+    .main-content { flex: 1; padding: 20px; display: flex; flex-direction: column;
+        box-shadow: 4px 0px 10px 0px rgba(34, 60, 80, 0.619) inset; background-color:#d9ebff; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .header h1 { margin-top: 0.3px; font-size: 22px; color: #2c3e50; }
+    #oil-map{width:100%;height:100%;position:relative}
+    .status-indicators { display: flex; gap: 15px; }
+    .indicator { display: flex; align-items: center; gap: 5px; }
+    .indicator-color { width: 12px; height: 12px; border-radius: 50%; }
+    .green { background-color: #2ecc71; }
+    .red { background-color: #e74c3c; }
+    .yellow { background-color: #f3b712; }
+    .map-container {
+        flex: 1; background-color: #295076; border-radius: 8px;
+        overflow: hidden; position: relative;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    .kpp {
+        position:absolute; width:90px; height:48px;
+        background:#fae9d4; border-radius:6px;
+        box-shadow:0 4px 10px rgba(0,0,0,.25);
+        display:flex; align-items:center; justify-content:center;
+        font-weight:700; color:#2b3a4a; z-index:30; border:5px solid #ffb977;
+    }
+
+    .loading-point {
+        position:absolute; width:56px; height:56px; border-radius:50%;
+        background: linear-gradient(180deg,#1e90ff,#1974d0);
+        display:flex; align-items:center; justify-content:center;
+        color:#fff; font-weight:700; box-shadow:0 6px 18px rgba(0,0,0,.35);
+        z-index:20; border:3px solid rgba(255,255,255,0.8);
+        cursor: default;
+    }
+    .loading-point .label{
+        position:absolute; top:65px; width:140px; left:50%; transform:translateX(-50%);
+        color:#fff; text-align:center; font-weight:600; font-size:13px; text-shadow:0 1px 2px rgba(0,0,0,.6);
+    }
+
+    .road { position:absolute; background:rgba(160, 172, 183, 0.534); height:8px; border-radius:6px; z-index:10; }
+
+    .truck {
+        position:absolute; width:48px; height:28px;
+        transform-origin:center center; z-index:40;
+        transform: translate(-50%,-50%);
+        cursor: default;
+        filter: drop-shadow(0 0 8px var(--truck-color));
+    }
+    .truck svg { width:48px; height:28px; display:block; }
+    .truck .body { fill: var(--truck-color, #2ecc71); }
+    .truck .cab { fill: var(--truck-color, #2ecc71); }
+    .truck .wheel { fill:#111; }
+    @keyframes truckBlink {0%, 100% { --truck-color: #ff6b6b; } 50% { --truck-color: #ffffff; }}
+    .truck.broken {
+        animation: truckBlink 0.4s infinite;
+        filter: drop-shadow(0 0 6px #ffffff) drop-shadow(0 0 12px #ff0000);
+        z-index: 45;
+        cursor: pointer;
+    }
+    .siren {
+        position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+        width:68px; height:68px; border-radius:50%;
+        animation: sirenPulse 1s infinite alternate;
+        box-shadow: 0 0 12px rgba(255,0,0,.6), 0 0 24px rgba(255,0,0,.3);
+        pointer-events:none; 
+        z-index:40;
+        background: radial-gradient(circle, rgba(255,0,0,.6) 0%, rgba(255,0,0,.3) 45%, rgba(255,0,0,0) 70%);
+    }
+    @keyframes sirenPulse { from{transform:translate(-50%,-50%) scale(.9)} to{transform:translate(-50%,-50%) scale(1.15)} }
+
+    .loading-point.broken-point {
+        animation: pointBlink 0.8s infinite;
+        box-shadow: 0 0 20px rgba(255,0,0,0.8), 0 0 40px rgba(255,0,0,0.4);
+        transform: scale(1.1);
+        transition: transform 0.3s ease;
+        z-index: 25;
+        cursor: pointer;
+    }
+    @keyframes pointBlink {
+        0%, 100% {background: linear-gradient(180deg, #ff6b6b, #e74c3c); box-shadow: 0 0 25px rgba(255,0,0,0.9), 0 0 50px rgba(255,0,0,0.5);}
+        50% {background: linear-gradient(180deg, #e74c3c, #c0392b); box-shadow: 0 0 15px rgba(255,0,0,0.6), 0 0 30px rgba(255,0,0,0.3);}
+    }
+    .point-siren {
+        position: absolute;
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        animation: pointSirenPulse 1.2s infinite alternate;
+        box-shadow: 0 0 20px rgba(255,0,0,.8), 0 0 40px rgba(255,0,0,.4);
+        pointer-events: none;
+        z-index: -1;
+        background: radial-gradient(circle, rgba(255,0,0,.7) 0%, rgba(255,0,0,.4) 45%, rgba(255,0,0,0) 70%);
+    }
+    @keyframes pointSirenPulse {from { transform: scale(.85); opacity: 0.7; } to { transform: scale(1.25); opacity: 1; }}
+
+    .modal {
+        display: none;
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+        padding: 25px;
+        border-radius: 15px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.5), 0 0 0 3px #e74c3c, 0 0 20px rgba(231, 76, 60, 0.4);
+        z-index: 1000;
+        width: 400px;
+        border: 1px solid #34495e;
+        font-family: Arial, sans-serif;
+    }
+    .modal-header {display: flex; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid #e74c3c;}
+    .modal-header h3 {margin: 0; color: #ecf0f1; font-size: 22px; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,0.3); flex: 1;}
+    .modal-icon {font-size: 28px; margin-right: 12px; margin-top: -7px; color: #e74c3c;}
+    .modal-content {margin-bottom: 25px; color: #ecf0f1; line-height: 1.6; font-size: 16px;}
+    .modal-info {background: rgba(91, 130, 169, 0.6); padding: 10px; border-radius: 8px; border-left: 4px solid #e74c3c; margin: 10px 0;}
+    .modal-info span {font-weight: 600; color: #ffa69d;}
+    .modal-footer {display: flex; justify-content: flex-end; gap: 15px;}
+    .modal-close {
+        background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+        color: white;
+        border: none;
+        padding: 12px 25px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 16px;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(231, 76, 60, 0.3);
+    }
+    .modal-close:hover {
+        background: linear-gradient(135deg, #ff6b6b 0%, #e74c3c 100%);
+        box-shadow: 0 6px 20px rgba(231, 76, 60, 0.4);
+    }
+    .modal-close:active {
+        transform: translateY(0);
+        box-shadow: 0 2px 10px rgba(231, 76, 60, 0.3);
+    }
+    .modal.show {animation: modalAppear 0.3s ease-out;}
+    @keyframes modalAppear {
+        from {opacity: 0; transform: translate(-50%, -50%) scale(0.9);}
+        to {opacity: 1; transform: translate(-50%, -50%) scale(1);}
+    }
+    
+    #point-modal {box-shadow: 0 10px 30px rgba(0,0,0,0.5), 0 0 0 3px #f39c12, 0 0 20px rgba(243, 156, 18, 0.4);}
+    #point-modal .modal-header {border-bottom: 2px solid #f39c12;}
+    #point-modal .modal-icon {color: #f39c12;}
+    #point-modal .modal-info span {color: #ffc76e; font-weight: 600;}
+    #point-modal .modal-close {
+        background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+        box-shadow: 0 4px 15px rgba(243, 156, 18, 0.3);
+    }
+    #point-modal .modal-close:hover {
+        background: linear-gradient(135deg, #f1c40f 0%, #f39c12 100%);
+        box-shadow: 0 6px 20px rgba(243, 156, 18, 0.4);
+    }
+
+    .stats-panel {
+        position: absolute; bottom: 20px; left: 20px;
+        background: linear-gradient(180deg, #ffd9be 0%, #cfdafc 70%);
+        padding: 12px 18px;
+        border-radius: 8px;
+        font-size: 16px; 
+        z-index: 20;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        text-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        border: 1px solid rgba(255,255,255,0.2);
+    }
+    .point-highlight { box-shadow:0 0 18px 6px rgba(59, 255, 242, 0.514), 0 6px 18px rgba(0,0,0,.35); }
+
+    .overlay {display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999;}
+    
+    .sidebar-clock {position: fixed; bottom: 20px; left: 20px; width: 210px; text-align: center;}
+    .clock-container { display: flex; align-items: center; justify-content: center; gap: 10px; color: #d9ebff; font-family: Arial, sans-serif; font-size: 15px; padding: 8px 0; font-size: 21px; margin-bottom: -6px;}
+    .clock-time {font-weight: 600; color: #ffb969; letter-spacing: 1.2px; text-shadow: 0 1px 2px rgba(0,0,0,0.3);}
+    .clock-separator {color: #3498db; font-weight: 600;}
+    .clock-date {color: #d9ebff; opacity: 0.9; letter-spacing: 1px;}
+
+    .tab-content {
+        flex: 1;
+        background-color: #295076;
+        border-radius: 8px;
+        overflow: hidden;
+        position: relative;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        height: 100%;
+    }
+    .video-container img, .analytics-container img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 8px;
+        margin-top: -0.5%;
+    }
+    .analytics-container img {margin-top: 0;}
+    .video-container,
+    .analytics-container,
+    .drivers-container,
+    .invoices-container {width: 100%; height: 100%; border-radius: 8px;}
+    .drivers-container img {margin-top: 7.8%;}
+    .folders-grid {display: grid; grid-template-columns: repeat(5, 1fr); gap: 80px; margin: 20px 20px 0px 20px;}
+    .folder-card {
+        text-align: center;
+        padding: 5px 15px;
+        background-color: #337bc4;
+        border-radius: 15px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        border: 2px solid #dee2e6;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    .folder-card:hover {
+        box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+        background: linear-gradient(145deg, #e3f2fd, #bbdefb);
+        border-color: #90caf9;
+    }
+    .folder-emoji {font-size: 4rem; margin-bottom: 10px; transition: transform 0.3s ease;}
+    .folder-card:hover .folder-date {color: #2c3e50;}
+    .folder-date {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #d9ebff;
+        font-family: 'Arial', sans-serif;
+        margin-bottom: 11px;
+    }
+    .files-container {max-width: 800px; margin: 0 auto;}
+    .file-link {
+        display: block;
+        padding: 12px 15px;
+        margin: 25px 0;
+        background: #c9e3ff;
+        border-radius: 6px;
+        text-decoration: none;
+        color: #2c3e50;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        border: 1px solid #dee2e6;
+    }
+    .file-link:hover {background: white; border-color: #007bff;}
+    .folder-card.active {
+        background: linear-gradient(145deg, #e3f2fd, #bbdefb) !important;
+        border-color: #90caf9 !important;
+        box-shadow: 0 8px 16px rgba(0,0,0,0.15) !important;
+    }
+    .folder-card.active .folder-date {color: #2c3e50 !important;}
+</style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h2><u>Панель оператора</u></h2>
+        </div>
+        <div class="menu-item active" data-tab="system">🔍 &nbsp;Обзор системы</div>
+        <div class="menu-item" data-tab="video">📹 &nbsp;Видеонаблюдение</div>
+        <div class="menu-item" data-tab="analytics">📊&nbsp;&nbsp;Аналитика</div>
+        <div class="menu-item" data-tab="drivers">🚚 &nbsp;Водители</div>
+        <div class="menu-item" data-tab="invoices">📝&ensp;Накладные</div>
+        <div class="sidebar-clock">
+            <div class="clock-container">
+                <span class="clock-time" id="current-time">16:27</span>
+                <span class="clock-separator">•</span>
+                <span class="clock-date" id="current-date">26.08.2024</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="header">
+            <h1>Мониторинг процесса отгрузки нефтепродуктов</h1>
+            <div class="status-indicators">
+                <div class="indicator"><div class="indicator-color green"></div><span>В движении</span></div>
+                <div class="indicator"><div class="indicator-color yellow"></div><span>В пункте налива</span></div>
+                <div class="indicator"><div class="indicator-color red"></div><span>Поломка</span></div>
+            </div>
+        </div>
+
+        <div class="map-container">
+            <div id="oil-map"></div>
+            <div class="stats-panel point-highlight">
+                <u>Машин на карте:</u> <b><span id="truck-count">0</span></b>&ensp; ✅&nbsp;
+                <u>Занято пунктов:</u> <b><span id="busy-points">0</span></b> <br><br>
+                <u>Сломано машин:</u> <b><span id="broken-count">0</span></b>&nbsp; ❌&nbsp;
+                <u>Сломано пунктов:</u> <b><span id="broken-points">0</span></b>
+            </div>
+        </div>
+        <div class="tab-content hidden" id="video-content">
+            <div class="video-container">
+                <img src="https://www.securecam.ru/upload/22.jpg" 
+                    alt="Видеонаблюдение" style="max-width:100%; border-radius:8px;">
+            </div>
+        </div>
+        <div class="tab-content hidden" id="analytics-content">
+            <div class="analytics-container">
+                <img src="https://sandalwood.com/wp-content/uploads/2021/04/iDashboardsExample.png" 
+                    alt="Аналитика" style="max-width:100%; border-radius:8px;">
+            </div>
+        </div>
+        <div class="tab-content hidden" id="drivers-content">
+            <div class="drivers-container">
+                <img src="https://i.yapx.ru/aYzYi.png" 
+                    alt="Водители" style="max-width:100%; border-radius:8px;">
+            </div>
+        </div>
+        <div class="tab-content hidden" id="invoices-content">
+            <div class="invoices-container">
+                <div class="folders-grid">
+                    <div class="folder-card" data-folder="folder1">
+                        <div class="folder-emoji">📁</div>
+                        <div class="folder-date">21.08.2025</div>
+                    </div>
+                    <div class="folder-card" data-folder="folder2">
+                        <div class="folder-emoji">📁</div>
+                        <div class="folder-date">22.08.2025</div>
+                    </div>
+                    <div class="folder-card" data-folder="folder3">
+                        <div class="folder-emoji">📁</div>
+                        <div class="folder-date">23.08.2025</div>
+                    </div>
+                    <div class="folder-card" data-folder="folder4">
+                        <div class="folder-emoji">📁</div>
+                        <div class="folder-date">24.08.2025</div>
+                    </div>
+                    <div class="folder-card" data-folder="folder5">
+                        <div class="folder-emoji">📁</div>
+                        <div class="folder-date">25.08.2025</div>
+                    </div>
+                </div>
+                <div class="files-container">
+                    <div id="folder1-files" class="files-list hidden">
+                        <a href="#" class="file-link">📄 Скан транспортной накладной Иванов А.С.</a>
+                        <a href="#" class="file-link">📄 Скан транспортной накладной Петров В.И.</a>
+                        <a href="#" class="file-link">📄 Скан транспортной накладной Сидоров М.П.</a>
+                    </div>
+                    <div id="folder2-files" class="files-list hidden">
+                        <a href="#" class="file-link">📄 Скан транспортной накладной Кузнецов Д.А.</a>
+                        <a href="#" class="file-link">📄 Скан транспортной накладной Смирнов О.Л.</a>
+                        <a href="#" class="file-link">📄 Скан транспортной накладной Морозов В.Р.</a>
+                    </div>
+                    <div id="folder3-files" class="files-list hidden">
+                        <a href="#" class="file-link">📄 Скан транспортной накладной Попов Р.Н.</a>
+                        <a href="#" class="file-link">📄 Скан транспортной накладной Васильев И.К.</a>
+                        <a href="#" class="file-link">📄 Скан транспортной накладной Павлов С.М.</a>
+                    </div>
+                    <div id="folder4-files" class="files-list hidden">
+                        <a href="#" class="file-link">📄 Скан транспортной накладной Семёнов А.В.</a>
+                        <a href="#" class="file-link">📄 Скан транспортной накладной Голубев П.Д.</a>
+                        <a href="#" class="file-link">📄 Скан транспортной накладной Зайцев О.И.</a>
+                    </div>
+                    <div id="folder5-files" class="files-list hidden">
+                        <a href="#" class="file-link">📄 Скан транспортной накладной Волков Н.С.</a>
+                        <a href="#" class="file-link">📄 Скан транспортной накладной Козлов М.А.</a>
+                        <a href="#" class="file-link">📄 Скан транспортной накладной Новиков Д.П.</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    <div class="overlay" id="overlay"></div>
+    <div class="modal" id="truck-modal">
+        <div class="modal-header">
+            <div class="modal-icon">⚠️</div>
+            <h3>Аварийное оповещение</h3>
+        </div>
+        <div class="modal-content">
+            <div class="modal-info">
+                Время въезда: <span id="truck-entry-time"></span><br>
+                Гос. номер: <span id="truck-number"></span><br>
+                Водитель: <span id="truck-driver"></span><br>
+                Текущая масса: <span id="truck-weight"></span><br>
+                Объём налитого топлива: <span id="truck-fuel-volume"></span>
+            </div>
+            <div class="modal-info">
+                Время остановки: <span id="truck-breakdown-time"></span>
+            </div>
+            <p>Транспортное средство требует немедленного внимания. Пожалуйста, примите меры!</p>
+        </div>
+        <div class="modal-footer">
+            <button class="modal-close" onclick="closeModal()">Принять к сведению</button>
+        </div>
+    </div>
+
+    <div class="modal" id="point-modal">
+        <div class="modal-header">
+            <div class="modal-icon">🚨</div>
+            <h3>Авария пункта налива №<span id="point-number"></span></h3>
+        </div>
+        <div class="modal-content">
+            <div class="modal-info">
+                <table style="width:100%; border-collapse: collapse;">
+                    <tr>
+                        <td style="padding:5px 0; border-bottom:2px solid rgba(255, 255, 255, 0.34)"><strong>Вид топлива:</strong></td>
+                        <td style="padding:5px 0; border-bottom:2px solid rgba(255, 255, 255, 0.34); text-align:right"><span id="point-fuel-type"></span></td>
+                    </tr>
+                    <tr>
+                        <td style="padding:5px 0; border-bottom:2px solid rgba(255, 255, 255, 0.34)"><strong>Температура:</strong></td>
+                        <td style="padding:5px 0; border-bottom:2px solid rgba(255, 255, 255, 0.34); text-align:right"><span id="point-temperature"></span> °C</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:5px 0; border-bottom:2px solid rgba(255, 255, 255, 0.34)"><strong>Давление:</strong></td>
+                        <td style="padding:5px 0; border-bottom:2px solid rgba(255, 255, 255, 0.34); text-align:right"><span id="point-pressure"></span> бар</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:5px 0"><strong>Скорость налива:</strong></td>
+                        <td style="padding:5px 0; text-align:right"><span id="point-flow-rate"></span> л/мин</td>
+                    </tr>
+                </table>
+            </div>
+            <div class="modal-info" style="margin-top:15px">
+                <strong>Время поломки:</strong> <span id="point-time"></span><br>
+            </div>
+            <p style="margin-top:15px; font-size:16px; color:#ecf0f1">Уведомление отправлено ремонтной бригаде.</p>
+        </div>
+        <div class="modal-footer">
+            <button class="modal-close" onclick="closePointModal()">Принять к сведению</button>
+        </div>
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    let currentOpenFolder = null;
+    let currentActiveCard = null;
+    const folderCards = document.querySelectorAll('.folder-card');
+    folderCards.forEach(card => {
+        card.addEventListener('click', function() {
+            const folderId = this.getAttribute('data-folder');
+            const filesElement = document.getElementById(`${folderId}-files`);
+            if (currentActiveCard && currentActiveCard !== this) {
+                currentActiveCard.classList.remove('active');
+            }
+            if (currentOpenFolder && currentOpenFolder !== filesElement) {
+                currentOpenFolder.classList.add('hidden');
+            }
+            if (filesElement) {
+                filesElement.classList.toggle('hidden');
+                if (!filesElement.classList.contains('hidden')) {
+                    this.classList.add('active');
+                    currentActiveCard = this;
+                } else {
+                    this.classList.remove('active');
+                    currentActiveCard = null;
+                }
+                currentOpenFolder = filesElement.classList.contains('hidden') ? null : filesElement;
+            }
+        });
+    });
+    
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('.folder-card') && !e.target.closest('.files-container')) {
+            const allFiles = document.querySelectorAll('.files-list');
+            allFiles.forEach(file => file.classList.add('hidden'));
+            const allCards = document.querySelectorAll('.folder-card');
+            allCards.forEach(card => card.classList.remove('active'));
+            currentOpenFolder = null;
+            currentActiveCard = null;
+        }
+    });
+
+    const map = document.getElementById('oil-map');
+    const mapW = map.clientWidth, mapH = map.clientHeight;
+
+    const kppA = document.createElement('div');
+    kppA.className = 'kpp'; kppA.textContent = 'КПП A';
+    kppA.style.left = '20px'; kppA.style.top = '20px';
+    map.appendChild(kppA);
+
+    const kppB = document.createElement('div');
+    kppB.className = 'kpp'; kppB.textContent = 'КПП Б';
+    kppB.style.right = '20px'; kppB.style.bottom = '20px';
+    map.appendChild(kppB);
+
+    const pointPositions = [
+        {x: 350, y: 180},
+        {x: mapW - 240, y: 110},
+        {x: 220, y: Math.round(mapH/2 - 40)},
+        {x: mapW - 370, y: Math.round(mapH/2 - 90)},
+        {x: Math.round(mapW/2), y: mapH - 160}
+    ];
+    
+    const loadingTimes = [8000, 7500, 8500, 9000, 8200];
+
+    const loadingPoints = [];
+    for (let i=0;i<5;i++){
+        const p = document.createElement('div');
+        p.className = 'loading-point';
+        p.id = 'point-'+i;
+        p.style.left = pointPositions[i].x + 'px';
+        p.style.top  = pointPositions[i].y + 'px';
+        p.innerHTML = `<div style="font-size:21px;position:absolute;top:1px;">⛽</div>
+                       <div style="position:absolute;bottom:-3px;left:50%;transform:translateX(-50%);font-weight:800">${i+1}</div>`;
+        const label = document.createElement('div');
+        label.className = 'label';
+        label.textContent = 'Пункт ' + (i+1);
+        p.appendChild(label);
+        p.onclick = function() {
+            if (loadingPoints[i].isBroken) {
+                showPointModal(loadingPoints[i]);
+            }
+        };
+        map.appendChild(p);
+
+        loadingPoints.push({
+            element: p, position: pointPositions[i],
+            occupied: false, enRoute: false, isBroken: false,
+            loadingTime: loadingTimes[i], id: i,
+            normalParams: {fuelType: getFuelType(), temperature: getTemperature(), pressure: getPressure(), flowRate: getFlowRate()}
+        });
+    }
+
+    function createRoad(x1,y1,x2,y2){
+        const r = document.createElement('div'); r.className='road';
+        const length = Math.hypot(x2-x1,y2-y1);
+        const angle = Math.atan2(y2-y1,x2-x1)*180/Math.PI;
+        r.style.width = length+'px'; r.style.height = '6px';
+        r.style.left = x1+'px'; r.style.top = y1+'px';
+        r.style.transform = `rotate(${angle}deg)`; r.style.transformOrigin = '0 0';
+        map.appendChild(r);
+    }
+    for (let i=0;i<5;i++){
+        createRoad(65,65, pointPositions[i].x+28, pointPositions[i].y+28);
+        createRoad(pointPositions[i].x+28, pointPositions[i].y+28, mapW-65, mapH-72);
+    }
+
+    /* --- Основные переменные --- */
+    const trucks = [];
+    let brokenCount = 0;
+    const TRUCK_SPEED = 1;
+    const MAX_TRUCKS = 16;
+
+    function setTruckColor(el, color){
+        const mapColor = { green:'#2ecc71', yellow:'#f1c40f', red:'#e74c3c' }[color] || '#2ecc71';
+        el.style.setProperty('--truck-color', mapColor);
+    }
+
+    function makeTruckSVG(){
+        const div = document.createElement('div');
+        div.className = 'truck';
+        div.innerHTML = `
+          <svg viewBox="0 0 38 28" xmlns="http://www.w3.org/2000/svg" aria-label="truck">
+            <rect class="body" x="10" y="7" rx="5" ry="5" width="28" height="14"/>
+            <rect class="cab"  x="38" y="9" rx="5" ry="3" width="8" height="10"/>
+            <circle class="wheel" cx="18" cy="23" r="3.2"/>
+            <circle class="wheel" cx="34" cy="23" r="3.2"/>
+          </svg>`;
+        setTruckColor(div,'green');
+        return div;
+    }
+
+    function showSiren(truckEl){
+        if (truckEl._siren) return;
+        const s = document.createElement('div');
+        s.className = 'siren';
+        truckEl.appendChild(s);
+        truckEl._siren = s;
+    }
+    function hideSiren(truckEl){if (truckEl._siren){ truckEl._siren.remove(); truckEl._siren=null; }}
+
+    function updateStats(){
+        document.getElementById('truck-count').textContent = trucks.length;
+        document.getElementById('busy-points').textContent = loadingPoints.filter(p=>p.occupied).length;
+        document.getElementById('broken-count').textContent = brokenCount;
+        document.getElementById('broken-points').textContent = loadingPoints.filter(p=>p.isBroken).length;
+    }
+
+    window.showModal = function(truck) {
+        document.getElementById('overlay').style.display = 'block';
+        const modal = document.getElementById('truck-modal');
+        modal.style.display = 'block';
+        modal.classList.add('show');
+        document.getElementById('truck-entry-time').textContent = getRandomEntryTime();
+        document.getElementById('truck-number').textContent = getRandomLicensePlate();
+        document.getElementById('truck-driver').textContent = getRandomDriver();
+        document.getElementById('truck-weight').textContent = getRandomWeight() + ' кг';
+        document.getElementById('truck-fuel-volume').textContent = getRandomFuelVolume() + ' л';
+        document.getElementById('truck-breakdown-time').textContent = new Date().toLocaleTimeString();
+        modal._truck = truck;
+    };
+
+    window.closeModal = function() {
+        document.getElementById('overlay').style.display = 'none';
+        const modal = document.getElementById('truck-modal');
+        modal.style.display = 'none';
+        modal.classList.remove('show');
+        
+        const truck = modal._truck;
+        if (truck && truck.isBroken) {
+            setTimeout(() => {
+                if (truck.element && truck.element.parentNode) {
+                    truck.element.classList.remove('broken');
+                    setTruckColor(truck.element, 'green');
+                    hideSiren(truck.element);
+                    truck.isBroken = false;
+                    brokenCount--;
+                    updateStats();
+                    if (truck.pathIndex < truck.path.length) { moveTruck(truck); }
+                }
+            }, 5000);
+        }
+    };
+
+    function getRandomDriver() {
+        const drivers = [
+            'Иванов А.С.', 'Петров В.И.', 'Сидоров М.П.', 'Кузнецов Д.А.', 'Смирнов О.Л.',
+            'Попов Р.Н.', 'Васильев И.К.', 'Павлов С.М.', 'Семёнов А.В.', 'Голубев П.Д.',
+            'Волков Н.С.', 'Козлов М.А.', 'Новиков Д.П.', 'Морозов В.Р.', 'Зайцев О.И.'
+        ];
+        return drivers[Math.floor(Math.random() * drivers.length)];
+    }
+
+    function getRandomLicensePlate() {
+        const letters = 'АВЕКМНОРСТУХ';
+        const letter1 = letters[Math.floor(Math.random() * letters.length)];
+        const letter2 = letters[Math.floor(Math.random() * letters.length)];
+        const letter3 = letters[Math.floor(Math.random() * letters.length)];
+        const numbers = Math.floor(100 + Math.random() * 900); // 100-999
+        return `${letter1}${numbers}${letter2}${letter3}`;
+    }
+
+    function getRandomWeight() {return Math.floor(8000 + Math.random() * 12000);}
+    function getRandomFuelVolume() {return Math.floor(5000 + Math.random() * 10000);}
+    function getRandomEntryTime() {
+        const minutesAgo = Math.floor(1 + Math.random() * 30);
+        const time = new Date(Date.now() - minutesAgo * 60000);
+        return time.toLocaleTimeString();
+    }
+
+    function createTruck(){
+        if (trucks.length >= MAX_TRUCKS) return;
+        const freePoints = loadingPoints.filter(p => !p.occupied && !p.enRoute && !p.isBroken);
+        if (freePoints.length === 0) return;
+
+        const target = freePoints[Math.floor(Math.random() * freePoints.length)];
+        target.enRoute = true;
+
+        const truckEl = makeTruckSVG();
+        truckEl.style.left = '65px';
+        truckEl.style.top = '65px';
+        map.appendChild(truckEl);
+
+        const truck = {
+            id: 'truck-'+Date.now(),
+            element: truckEl,
+            status: 'moving',
+            targetPoint: target.id,
+            currentPosition: {x:65, y:65},
+            speed: TRUCK_SPEED,
+            path: buildPath(target.id),
+            pathIndex: 0,
+            isBroken: false,
+            entryTime: getRandomEntryTime(),
+            licensePlate: getRandomLicensePlate(),
+            driver: getRandomDriver(),
+            weight: getRandomWeight(),
+            fuelVolume: getRandomFuelVolume()
+        };
+        
+        truckEl.onclick = function() {
+            if (truck.isBroken) {showModal(truck);}
+        };
+        trucks.push(truck);
+        updateStats();
+        moveTruck(truck);
+    }
+
+    function breakLoadingPoint() {
+        if (Math.random() > 0.2) return;
+        const availablePoints = loadingPoints.filter(point => !point.isBroken && !point.occupied && !point.enRoute);
+        if (availablePoints.length === 0) return;
+
+        const randomPoint = availablePoints[Math.floor(Math.random() * availablePoints.length)];
+        randomPoint.isBroken = true;
+        randomPoint.element.classList.add('broken-point');
+        
+        const pulse = document.createElement('div');
+        pulse.className = 'point-siren';
+        randomPoint.element.appendChild(pulse);
+        randomPoint._siren = pulse;
+        updateStats();
+    }
+
+    function repairLoadingPoint(point) {
+        if (point._siren) {
+            point._siren.remove();
+            point._siren = null;
+        }
+        point.element.classList.remove('broken-point');
+        point.isBroken = false;
+        updateStats();
+    }
+
+    window.showPointModal = function(point) {
+        document.getElementById('overlay').style.display = 'block';
+        const modal = document.getElementById('point-modal');
+        modal.style.display = 'block';
+        modal.classList.add('show');
+        document.getElementById('point-number').textContent = point.id + 1;
+        document.getElementById('point-fuel-type').textContent = getFuelType();
+        document.getElementById('point-temperature').textContent = getAbnormalTemperature();
+        document.getElementById('point-pressure').textContent = getAbnormalPressure();
+        document.getElementById('point-flow-rate').textContent = getAbnormalFlowRate();
+        document.getElementById('point-time').textContent = new Date().toLocaleTimeString();
+        modal._point = point;
+    };
+
+    function getFuelType() {
+        const fuelTypes = ['АИ-92', 'АИ-95', 'АИ-98', 'ДТ (Дизель)', 'ДТ Евро-5'];
+        return fuelTypes[Math.floor(Math.random() * fuelTypes.length)];
+    }
+    function getTemperature() {return (15 + Math.random() * 10).toFixed(1);}
+    function getPressure() {return (3.5 + Math.random() * 1.5).toFixed(1);}
+    function getFlowRate() {return Math.floor(800 + Math.random() * 400);}
+    function getAbnormalTemperature() {return (45 + Math.random() * 25).toFixed(1);}
+    function getAbnormalPressure() {return (0.5 + Math.random() * 0.8).toFixed(1);}
+    function getAbnormalFlowRate() {return Math.floor(100 + Math.random() * 200);}
+
+    window.closePointModal = function() {
+        document.getElementById('overlay').style.display = 'none';
+        const modal = document.getElementById('point-modal');
+        modal.style.display = 'none';
+        modal.classList.remove('show');
+        const point = modal._point;
+        if (point && point.isBroken) {
+            setTimeout(() => {
+                if (point.element && point.element.parentNode) {
+                    if (point._siren) {
+                        point._siren.remove();
+                        point._siren = null;
+                    }
+                    point.element.classList.remove('broken-point');
+                    point.isBroken = false;
+                    updateStats();
+                }
+            }, 3000);
+        }
+    };
+
+    function breakRandomTruck() {
+        if (Math.random() > 0.3) return;
+        const availableTrucks = trucks.filter(truck => 
+            !truck.isBroken && 
+            truck.status === 'moving' && // Только машины в движении
+            truck.pathIndex > 2 && // Исключаем начало пути у КПП A
+            truck.pathIndex < truck.path.length - 2 && // Исключаем конец пути у КПП B
+            truck.pathIndex !== 4 //Исключаем точку на пункте налива (индекс 4 в path)
+        );
+        if (availableTrucks.length === 0) return;
+        const randomTruck = availableTrucks[Math.floor(Math.random() * availableTrucks.length)];
+        randomTruck.isBroken = true;
+        randomTruck.status = 'broken';
+        setTruckColor(randomTruck.element, 'red');
+        randomTruck.element.classList.add('broken');
+        showSiren(randomTruck.element);
+        brokenCount++;
+        updateStats();
+        randomTruck.element.style.cursor = 'pointer';
+        randomTruck.element.onclick = function() {showModal(randomTruck);};
+    }
+
+    function buildPath(pointId){
+        const path = [];
+        const sx=65, sy=65;
+        const px = pointPositions[pointId].x+28, py=pointPositions[pointId].y+28;
+        const ex = mapW-70, ey = mapH-78;
+        // Путь от КПП A к пункту налива
+        path.push({x:sx, y:sy});
+        for (let i=1;i<=3;i++){ 
+            const t=i/3; 
+            path.push({
+                x: sx+(px-sx)*t, 
+                y: sy+(py-sy)*t
+            }); 
+        }
+        path.push({x:px, y:py}); // Точка налива
+        // Путь от пункта налива к КПП Б (укороченный)
+        for (let i=1;i<=2;i++){ 
+            const t=i/2; 
+            path.push({
+                x: px+(ex-px)*t, 
+                y: py+(ey-py)*t
+            }); 
+        }
+        path.push({x:ex, y:ey});
+        return path;
+    }
+
+    function moveTruck(truck){
+        if (truck.isBroken) return;
+        if (truck.status === 'loading') return;
+        if (truck.pathIndex >= truck.path.length){
+            const index = trucks.findIndex(t => t.id === truck.id);
+            if (index !== -1) {
+                trucks.splice(index, 1);
+                if (truck.element && truck.element.parentNode) {
+                    map.removeChild(truck.element);
+                }
+                updateStats();
+            }
+            return;
+        }
+
+        const currentTarget = truck.path[truck.pathIndex];
+        const dx = currentTarget.x - truck.currentPosition.x;
+        const dy = currentTarget.y - truck.currentPosition.y;
+        const distance = Math.hypot(dx, dy);
+
+        if (distance > truck.speed) {
+            truck.currentPosition.x += (dx / distance) * truck.speed;
+            truck.currentPosition.y += (dy / distance) * truck.speed;
+            const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+
+            truck.element.style.left = truck.currentPosition.x + 'px';
+            truck.element.style.top = truck.currentPosition.y + 'px';
+            truck.element.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`;
+            requestAnimationFrame(() => moveTruck(truck));
+        } else {
+            truck.currentPosition.x = currentTarget.x;
+            truck.currentPosition.y = currentTarget.y;
+            truck.pathIndex++;
+
+            if (truck.pathIndex === 5) {
+                const point = loadingPoints[truck.targetPoint];
+                
+                if (!point.occupied) {
+                    point.occupied = true;
+                    point.enRoute = false;
+                    setTruckColor(truck.element, 'yellow');
+                    truck.status = 'loading';
+
+                    setTimeout(() => {
+                        if (!truck.isBroken) {
+                            point.occupied = false;
+                            setTruckColor(truck.element, 'green');
+                            truck.status = 'moving';
+                            moveTruck(truck);
+                        }
+                    }, point.loadingTime);
+                }
+            } else {
+                requestAnimationFrame(() => moveTruck(truck));
+            }
+        }
+    }
+
+    /* --- Запуск системы --- */
+    for (let i=0;i<3;i++) setTimeout(createTruck, i*2000);
+    setInterval(() => {
+        if (trucks.length < MAX_TRUCKS) {
+            createTruck();
+        }
+    }, 3000);
+
+    function updateClock() {
+        const now = new Date();
+        const hours = now.getHours().toString().padStart(2, '0');
+        const minutes = now.getMinutes().toString().padStart(2, '0');
+        const timeElement = document.getElementById('current-time');
+        const dateElement = document.getElementById('current-date');
+        
+        if (timeElement) { timeElement.textContent = `${hours}:${minutes}`;}
+        if (dateElement) {
+            const day = now.getDate().toString().padStart(2, '0');
+            const month = (now.getMonth() + 1).toString().padStart(2, '0');
+            const year = now.getFullYear();
+            dateElement.textContent = `${day}.${month}.${year}`;
+        }
+    }
+    updateClock();
+    setInterval(updateClock, 60000);
+
+    const menuItems = document.querySelectorAll('.menu-item');
+    const tabContents = document.querySelectorAll('.tab-content, .map-container');
+    const statusIndicators = document.querySelector('.status-indicators');
+    const headerTitle = document.querySelector('.header h1');
+
+    // Функция переключения вкладок
+    function switchTab(tabIndex) {
+        tabContents.forEach(content => content.classList.add('hidden'));
+        tabContents[tabIndex].classList.remove('hidden');
+        if (tabIndex === 0) {
+            statusIndicators.classList.remove('hidden');
+            headerTitle.textContent = 'Мониторинг процесса отгрузки нефтепродуктов';
+        } else {
+            statusIndicators.classList.add('hidden');
+            const titles = [
+                'Мониторинг процесса отгрузки нефтепродуктов',
+                'Мониторинг процесса отгрузки нефтепродуктов',
+                'Дашборды «Отгрузка нефтепродуктов»',
+                'Сведения о водителях автоцистерн',
+                'Накладные и документы'
+            ];
+            headerTitle.textContent = titles[tabIndex];
+        }
+        menuItems.forEach(item => item.classList.remove('active'));
+        menuItems[tabIndex].classList.add('active');
+    }
+
+    menuItems.forEach((item, index) => {
+        item.addEventListener('click', function() {
+            switchTab(index);
+        });
+    });
+    switchTab(0);
+
+    setInterval(() => {
+        breakRandomTruck();
+    }, 20000 + Math.random() * 10000);
+  
+    setInterval(() => {
+        breakLoadingPoint();
+    }, 8000 + Math.random() * 7000);
+});
+</script>
+</body>
+</html>

@@ -20,8 +20,6 @@ RUN apt-get update && apt-get install -y \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Python уже установлен в базовом образе PyTorch
-
 # Установка рабочей директории
 WORKDIR /app
 
